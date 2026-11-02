@@ -1,0 +1,1016 @@
+local ID = "SpeedEscala_Panel_System"
+if shared[ID] then shared[ID]() end
+
+local P, R, W, C = game:GetService("Players"), game:GetService("RunService"), game:GetService("Workspace"), game:GetService("CoreGui")
+local L = P.LocalPlayer
+local U = game:GetService("UserInputService")
+local SoundService = game:GetService("SoundService")
+local Lighting = game:GetService("Lighting")
+
+-- ACTIVAR SHIFT LOCK OFICIAL EN CELULAR Y PC
+pcall(function()
+    L.DevEnableMouseLock = true
+end)
+
+-- ESTADOS Y VARIABLES
+local chamsActive, chamsConnections = false, {}
+local SPEED_ENABLED = false
+local speedEscalaActive = false
+local oldQualityActive = false
+local worldPinkActive = false
+local antiFlingActive = false
+local antiFlingConnection = nil
+local noclipActive = false
+local infJumpActive = false
+local oldAnimActive = false
+local oldShiftActive = false
+
+-- ESTADOS NUEVOS (GUN ANIM Y GUN SOUND)
+local gunAnimActive = false
+local gunSoundActive = false
+local actionSound = nil
+
+-- CONFIGURACIÓN GUN SOUND
+local SOUND_ID = "rbxassetid://6968135315"
+local TARGET_TOOL_NAME = "Gun"
+
+actionSound = Instance.new("Sound")
+actionSound.SoundId = SOUND_ID
+actionSound.Volume = 1
+actionSound.Parent = SoundService
+
+local lastUnequippedTime = 0
+local gunConnAdd = nil
+local gunConnRem = nil
+
+local function setupGunSystem(character)
+    if gunConnAdd then gunConnAdd:Disconnect() end
+    if gunConnRem then gunConnRem:Disconnect() end
+
+    gunConnAdd = character.ChildAdded:Connect(function(child)
+        if gunSoundActive and child:IsA("Tool") and child.Name == TARGET_TOOL_NAME then
+            actionSound:Play()
+        end
+    end)
+
+    gunConnRem = character.ChildRemoved:Connect(function(child)
+        if gunSoundActive and child:IsA("Tool") and child.Name == TARGET_TOOL_NAME then
+            actionSound:Play()
+            lastUnequippedTime = tick()
+        end
+    end)
+end
+
+if L.Character then setupGunSystem(L.Character) end
+L.CharacterAdded:Connect(setupGunSystem)
+
+-- LÓGICA GUN ANIM INTEGRADA (CONECTADA A gunAnimActive)
+local gabConn = nil
+local function applyGunAnim(enable)
+    if enable then
+        if L.Character then
+            local h = L.Character:FindFirstChildOfClass("Humanoid")
+            if h then
+                if gabConn then gabConn:Disconnect() end
+                gabConn = h.AnimationPlayed:Connect(function(t)
+                    if not gunAnimActive then return end
+                    local id = tostring(t.Animation.AnimationId):lower()
+                    local nm = tostring(t.Name):lower()
+                    if nm:find("throw") or nm:find("stab") or nm:find("slash") or id:find("throw") or id:find("247206411") then 
+                        return 
+                    end
+                    if id:find("reload") or nm:find("reload") or nm:find("recarga") or id:find("3400611413") or id:find("3400610059") or t.Priority == Enum.AnimationPriority.Action then 
+                        t:Stop()
+                    end
+                end)
+            end
+        end
+    else
+        if gabConn then gabConn:Disconnect(); gabConn = nil end
+    end
+end
+
+L.CharacterAdded:Connect(function(char)
+    char:WaitForChild("Humanoid", 5)
+    if gunAnimActive then
+        applyGunAnim(true)
+    end
+end)
+
+-- ESTADO ANTICOINS
+local anticoinsActive = false
+local anticoinsConnection = nil
+
+local MAX_SPEED, MIN_SPEED, speedValue = 200, 0, 95
+local humanoid, root
+
+-- CONFIGURACIÓN OLD SHIFT
+local shiftOffset = Vector3.new(1.2, 0.8, 0)
+local normalOffset = Vector3.new(0, 0, 0)
+local isShiftLocked = false
+
+R.RenderStepped:Connect(function()
+    if not humanoid then return end
+    if oldShiftActive then
+        if U.MouseBehavior == Enum.MouseBehavior.LockCenter then
+            if not isShiftLocked then
+                isShiftLocked = true
+                humanoid.CameraOffset = shiftOffset
+            end
+        else
+            if isShiftLocked then
+                isShiftLocked = false
+                humanoid.CameraOffset = normalOffset
+            end
+        end
+    else
+        if isShiftLocked then
+            isShiftLocked = false
+            humanoid.CameraOffset = normalOffset
+        end
+    end
+end)
+
+-- GUARDAR CONFIGURACIÓN ORIGINAL DE LIGHTING (OLD QUALITY)
+local originalLighting = {
+    GlobalShadows = Lighting.GlobalShadows,
+    Ambient = Lighting.Ambient,
+    OutdoorAmbient = Lighting.OutdoorAmbient,
+    Brightness = Lighting.Brightness,
+    EnvironmentDiffuseScale = Lighting.EnvironmentDiffuseScale,
+    EnvironmentSpecularScale = Lighting.EnvironmentSpecularScale,
+    ColorShift_Bottom = Lighting.ColorShift_Bottom,
+    ColorShift_Top = Lighting.ColorShift_Top
+}
+
+-- LÓGICA ANTIFLING (ARREGLADA PARA RESTAURAR COLISIONES AL APAGAR)
+local function applyAntiFling(enable)
+    if enable then
+        antiFlingConnection = R.Stepped:Connect(function()
+            for _, p in ipairs(P:GetPlayers()) do
+                if p ~= L and p.Character then
+                    for _, part in ipairs(p.Character:GetDescendants()) do
+                        if part:IsA("BasePart") then
+                            part.CanCollide = false
+                        end
+                    end
+                end
+            end
+        end)
+    else
+        if antiFlingConnection then
+            antiFlingConnection:Disconnect()
+            antiFlingConnection = nil
+        end
+        for _, p in ipairs(P:GetPlayers()) do
+            if p ~= L and p.Character then
+                for _, part in ipairs(p.Character:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        part.CanCollide = true
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- LÓGICA ANTICOINS
+local function applyAntiCoins(enable)
+    if enable then
+        for _, obj in pairs(W:GetDescendants()) do
+            if obj.Name:lower():find("coin") and obj:IsA("BasePart") then
+                obj.CanTouch = false
+            end
+        end
+        anticoinsConnection = W.DescendantAdded:Connect(function(obj)
+            if anticoinsActive then
+                task.wait(0.2)
+                if obj.Name:lower():find("coin") and obj:IsA("BasePart") then
+                    obj.CanTouch = false
+                end
+            end
+        end)
+    else
+        if anticoinsConnection then
+            anticoinsConnection:Disconnect()
+            anticoinsConnection = nil
+        end
+        for _, obj in pairs(W:GetDescendants()) do
+            if obj.Name:lower():find("coin") and obj:IsA("BasePart") then
+                obj.CanTouch = true
+            end
+        end
+    end
+end
+
+-- LÓGICA NOCLIP
+R.Stepped:Connect(function()
+    if noclipActive then
+        local char = L.Character
+        if char then
+            for _, part in ipairs(char:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.CanCollide = false
+                end
+            end
+        end
+    end
+end)
+
+-- LÓGICA INFINITE JUMP
+U.JumpRequest:Connect(function()
+    if infJumpActive and humanoid then
+        humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+    end
+end)
+
+-- LÓGICA OLD QUALITY
+local function applyOldQuality(enable)
+    if enable then
+        Lighting.GlobalShadows = false
+        Lighting.Ambient = Color3.fromRGB(140, 140, 140)
+        Lighting.OutdoorAmbient = Color3.fromRGB(140, 140, 140)
+        Lighting.Brightness = 1.5
+        Lighting.EnvironmentDiffuseScale = 0
+        Lighting.EnvironmentSpecularScale = 0
+        Lighting.ColorShift_Bottom = Color3.fromRGB(255, 255, 255)
+        Lighting.ColorShift_Top = Color3.fromRGB(255, 255, 255)
+
+        for _, v in pairs(workspace:GetDescendants()) do
+            if v:IsA("BasePart") or v:IsA("MeshPart") or v:IsA("UnionOperation") or v:IsA("CornerWedgePart") then
+                v.CastShadow = false
+            end
+        end
+
+        for _, light in pairs(workspace:GetDescendants()) do
+            if light:IsA("Light") then
+                light.Shadows = Enum.LightShadows.None
+            end
+        end
+    else
+        Lighting.GlobalShadows = originalLighting.GlobalShadows
+        Lighting.Ambient = originalLighting.Ambient
+        Lighting.OutdoorAmbient = originalLighting.OutdoorAmbient
+        Lighting.Brightness = originalLighting.Brightness
+        Lighting.EnvironmentDiffuseScale = originalLighting.EnvironmentDiffuseScale
+        Lighting.EnvironmentSpecularScale = originalLighting.EnvironmentSpecularScale
+        Lighting.ColorShift_Bottom = originalLighting.ColorShift_Bottom
+        Lighting.ColorShift_Top = originalLighting.ColorShift_Top
+
+        for _, v in pairs(workspace:GetDescendants()) do
+            if v:IsA("BasePart") or v:IsA("MeshPart") or v:IsA("UnionOperation") or v:IsA("CornerWedgePart") then
+                v.CastShadow = true
+            end
+        end
+
+        for _, light in pairs(workspace:GetDescendants()) do
+            if light:IsA("Light") then
+                light.Shadows = Enum.LightShadows.Hard
+            end
+        end
+    end
+end
+
+-- LÓGICA WORLD PINK
+local originalMapColors = {}
+local originalLightingPink = {}
+local worldPinkConnection = nil
+
+local function applyWorldPink(enable)
+    if enable then
+        originalLightingPink.Ambient = Lighting.Ambient
+        originalLightingPink.OutdoorAmbient = Lighting.OutdoorAmbient
+        originalLightingPink.FogColor = Lighting.FogColor
+
+        Lighting.Ambient = Color3.fromRGB(245, 225, 230)
+        Lighting.OutdoorAmbient = Color3.fromRGB(255, 215, 225)
+        Lighting.FogColor = Color3.fromRGB(255, 230, 235)
+
+        local colorCorrection = Lighting:FindFirstChild("WorldPinkCC") or Instance.new("ColorCorrectionEffect")
+        colorCorrection.Name = "WorldPinkCC"
+        colorCorrection.TintColor = Color3.fromRGB(255, 235, 240)
+        colorCorrection.Brightness = 0.05
+        colorCorrection.Saturation = -0.1
+        colorCorrection.Parent = Lighting
+
+        local PASTEL_PINK = Color3.fromRGB(255, 192, 203)
+        local SOFT_WHITE = Color3.fromRGB(250, 250, 250)
+
+        local function stylePart(object)
+            if object:IsA("BasePart") and not object.Parent:FindFirstChildOfClass("Humanoid") then
+                if not originalMapColors[object] then
+                    originalMapColors[object] = object.Color
+                end
+                local name = object.Name:lower()
+                if name:find("trim") or name:find("border") or name:find("detail") or name:find("frame") then
+                    object.Color = SOFT_WHITE
+                else
+                    object.Color = PASTEL_PINK
+                end
+            end
+        end
+
+        for _, descendant in ipairs(W:GetDescendants()) do
+            stylePart(descendant)
+        end
+
+        worldPinkConnection = W.DescendantAdded:Connect(stylePart)
+    else
+        if worldPinkConnection then
+            worldPinkConnection:Disconnect()
+            worldPinkConnection = nil
+        end
+
+        if originalLightingPink.Ambient then
+            Lighting.Ambient = originalLightingPink.Ambient
+            Lighting.OutdoorAmbient = originalLightingPink.OutdoorAmbient
+            Lighting.FogColor = originalLightingPink.FogColor
+        end
+
+        local cc = Lighting:FindFirstChild("WorldPinkCC")
+        if cc then cc:Destroy() end
+
+        for part, color in pairs(originalMapColors) do
+            if part and part.Parent then
+                part.Color = color
+            end
+        end
+        originalMapColors = {}
+    end
+end
+
+-- LISTA DE SKYBOXES
+local skyList = {
+    { Name = "Green Sky", Id = 566612745 },
+    { Name = "Void Sky", Id = 16262385808 },
+    { Name = "Aurora Sky 2", Id = 5952679029 },
+    { Name = "Aurora Borealis", Id = 123216280917106 },
+    { Name = "Aurora", Id = 110275406173477 },
+    { Name = "Spectacular Afternoon", Id = 17170210635 },
+    { Name = "Grey", Id = 5452410647 },
+    { Name = "Rainbow Sky", Id = 127719608807122 },
+    { Name = "Neon Sky", Id = 4683026098 },
+    { Name = "Bob Esponja", Id = 9076122431 },
+    { Name = "Minecraft", Id = 93134245891639 },
+    { Name = "Galaxia Rainbow", Id = 13306605006 },
+    { Name = "Black and White", Id = 93238026738412 },
+    { Name = "Alien Sky", Id = 6021177612 },
+    { Name = "Galaxy Halo", Id = 133304783530864 },
+    { Name = "Purple Sky", Id = 83547404302638 },
+    { Name = "Night Nice", Id = 5624448627 },
+    { Name = "Pink Sky", Id = 78228136457598 },
+    { Name = "Purple Sky 2", Id = 121369663521420 },
+    { Name = "Crimson Sky", Id = 570557337 },
+    { Name = "Black Hole Sky", Id = 121604797582981 },
+    { Name = "Lava Sky", Id = 45273622 },
+    { Name = "Sakura Sky", Id = 2847459681 },
+    { Name = "Pink Afternoon Sky", Id = 137000243 },
+    { Name = "Aurora Sky", Id = 97360352709329 },
+    { Name = "Aurora 2", Id = 18618130414 },
+    { Name = "Backrooms", Id = 98507948757016 },
+    { Name = "Yellow Sky", Id = 76747291 },
+    { Name = "Nebulosas Night Sky", Id = 136350850692118 },
+    { Name = "Rainbow Classic Sky", Id = 134369792617733 },
+    { Name = "Purple 2 Sky", Id = 93705354177623 },
+    { Name = "Atardecer", Id = 103695571973925 },
+    { Name = "Perfect World", Id = 116402178504134 },
+    { Name = "Halloween Sky", Id = 12733765154 },
+    { Name = "Galaxia Blue", Id = 16876793659 },
+    { Name = "Tropical Summer", Id = 13729557211580 },
+    { Name = "Green and Yellow Sky", Id = 14353126036 },
+    { Name = "Sun Halo", Id = 87779981190120 }
+}
+
+local function SetSky(assetId)
+    for _, v in ipairs(Lighting:GetChildren()) do
+        if v:IsA("Sky") or v:IsA("Atmosphere") then v:Destroy() end
+    end
+    if not assetId then return end
+
+    local textureUrl = "rbxassetid://" .. tostring(assetId)
+    local success, result = pcall(function()
+        return game:GetObjects("rbxassetid://" .. tostring(assetId))[1]
+    end)
+
+    if success and result and result:IsA("Sky") then
+        result.Name = "CustomSkybox"
+        result.Parent = Lighting
+    else
+        local newSky = Instance.new("Sky")
+        newSky.Name = "CustomSkybox"
+        newSky.SkyboxBk = textureUrl
+        newSky.SkyboxDn = textureUrl
+        newSky.SkyboxFt = textureUrl
+        newSky.SkyboxLf = textureUrl
+        newSky.SkyboxRt = textureUrl
+        newSky.SkyboxUp = textureUrl
+        newSky.CelestialBodiesShown = true
+        newSky.Parent = Lighting
+    end
+end
+
+-- SPEED ESCALA
+local escalaConnections = {}
+local SB, MS = 60, 280
+local gReady, mActive, isClimb, cSpam = false, false, false, 0
+local uT, cAD, uKey, isFast = 0, 0, "", false
+local uAY, dAnt, cG, uTG = 0, 0, 0, 0
+local camSp, tecSp = false, false
+local isGlitching = false
+
+local function frenaEscala()
+    local c = L.Character
+    if c and c:FindFirstChild("HumanoidRootPart") then
+        local hrp = c.HumanoidRootPart
+        local vY = hrp.Velocity.Y
+        if math.abs(vY) > 350 then vY = 0 end
+        hrp.Velocity = hrp.Velocity:Lerp(Vector3.new(0, vY, 0), 0.2)
+    end
+end
+
+local function cleanEscala()
+    gReady, mActive, cSpam, cAD, isFast, uKey = false, false, 0, 0, false, ""
+    cG, uAY, dAnt, camSp, tecSp = 0, 0, 0, false, false
+    isGlitching = false
+    frenaEscala()
+end
+
+local function checkGlitchState(char)
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hum or not hrp then return false end
+    local animator = hum:FindFirstChildOfClass("Animator")
+    if animator then
+        for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+            local name = string.lower(track.Name)
+            local animId = track.Animation and track.Animation.AnimationId or ""
+            if string.find(name, "swim") or string.find(animId, "swim") then
+                return true
+            end
+        end
+    end
+    local params = RaycastParams.new()
+    params.FilterDescendantsInstances = {char}
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    local hitClose = W:Raycast(hrp.Position, hrp.CFrame.LookVector * 1.8, params)
+    local hitDown = W:Raycast(hrp.Position, -Vector3.yAxis * 2.5, params)
+    if hitClose and hitDown then return true end
+    return hum:GetState() == Enum.HumanoidStateType.Swimming
+end
+
+local function stopSpeedEscala()
+    cleanEscala()
+    for _, cn in ipairs(escalaConnections) do
+        if cn and cn.Connected then cn:Disconnect() end
+    end
+    escalaConnections = {}
+end
+
+local function startSpeedEscala()
+    stopSpeedEscala()
+    local function setupChar(char)
+        cleanEscala()
+        local hum = char:WaitForChild("Humanoid", 5)
+        if not hum then return end
+        local cState = hum.StateChanged:Connect(function(_, st)
+            isClimb = (st == Enum.HumanoidStateType.Climbing)
+            if isClimb then
+                mActive = false
+            elseif gReady and (st == Enum.HumanoidStateType.Jumping or st == Enum.HumanoidStateType.Freefall) then
+                mActive = true
+            end
+        end)
+        table.insert(escalaConnections, cState)
+        local cAdd = char.ChildAdded:Connect(function(ch)
+            if ch:IsA("Tool") and isClimb then
+                cSpam = cSpam + 1
+                if cSpam >= 3 then gReady = true end
+            end
+        end)
+        table.insert(escalaConnections, cAdd)
+        local cDel = char.ChildRemoved:Connect(function(ch)
+            if ch:IsA("Tool") then
+                task.defer(function()
+                    if char and not char:FindFirstChildOfClass("Tool") and mActive then 
+                        cleanEscala() 
+                    end
+                end)
+            end
+        end)
+        table.insert(escalaConnections, cDel)
+    end
+
+    if L.Character then setupChar(L.Character) end
+    table.insert(escalaConnections, L.CharacterAdded:Connect(setupChar))
+
+    local cGlitchLoop = R.Heartbeat:Connect(function()
+        local c = L.Character
+        if c then isGlitching = checkGlitchState(c) end
+    end)
+    table.insert(escalaConnections, cGlitchLoop)
+
+    local cJumpInp = U.JumpRequest:Connect(function()
+        local c = L.Character
+        if isGlitching or (c and checkGlitchState(c)) then
+            if c and c:FindFirstChild("HumanoidRootPart") then
+                c.HumanoidRootPart.Velocity = Vector3.new(c.HumanoidRootPart.Velocity.X, 140, c.HumanoidRootPart.Velocity.Z)
+                isGlitching = false
+            end
+        end
+    end)
+    table.insert(escalaConnections, cJumpInp)
+
+    local cInp = U.InputBegan:Connect(function(inp, gpe)
+        if gpe or not mActive then return end
+        if inp.KeyCode == Enum.KeyCode.A or inp.KeyCode == Enum.KeyCode.D then
+            local actKey = inp.KeyCode.Name
+            local t = os.clock()
+            if (t - uT) > 0.3 then
+                cAD = 1; tecSp = false
+            else
+                if actKey ~= uKey then
+                    cAD = cAD + 1
+                    if cAD >= 2 then tecSp = true end
+                end
+            end
+            uT, uKey = t, actKey
+        end
+    end)
+    table.insert(escalaConnections, cInp)
+
+    local camera = W.CurrentCamera
+    local cStep = R.RenderStepped:Connect(function()
+        if isClimb or not mActive then return end
+        local c = L.Character
+        if not c or not c:FindFirstChild("HumanoidRootPart") or not c:FindFirstChild("Humanoid") then return end
+        local hrp = c.HumanoidRootPart
+        if hrp.Velocity.Magnitude > 320 then
+            local v = hrp.Velocity
+            local clampY = math.clamp(v.Y, -180, 180)
+            local capXZ = Vector3.new(v.X, 0, v.Z)
+            local maxSpeed = isFast and MS or SB
+            if capXZ.Magnitude > maxSpeed then
+                capXZ = capXZ.Unit * maxSpeed
+            end
+            hrp.Velocity = Vector3.new(capXZ.X, clampY, capXZ.Z)
+        end
+
+        local tAct = os.clock()
+        if c.Humanoid.FloorMaterial ~= Enum.Material.Air or (tAct - uT > 0.15 and tAct - uTG > 0.15) then
+            if isFast then frenaEscala() end
+            isFast, cAD, tecSp, camSp, cG = false, 0, false, false, 0
+        end
+
+        if camera then
+            local _, aY, _ = camera.CFrame:ToEulerAnglesYXZ()
+            local dAng = aY - uAY
+            if dAng > math.pi then dAng = dAng - (math.pi * 2)
+            elseif dAng < -math.pi then dAng = dAng + (math.pi * 2) end
+            if math.abs(dAng) > 0.08 then
+                local dAct = math.sign(dAng)
+                if dAct ~= dAnt then
+                    if tAct - uTG < 0.25 then
+                        cG = cG + 1
+                        if cG >= 3 then camSp = true end
+                    end
+                    dAnt, uTG = dAct, tAct
+                end
+            end
+            uAY = aY
+        end
+
+        if tecSp and camSp then isFast = true end
+        if c.Humanoid.FloorMaterial == Enum.Material.Air then
+            local md = c.Humanoid.MoveDirection
+            if md.Magnitude > 0 then
+                local vY = hrp.Velocity.Y
+                local spd = isFast and MS or SB
+                hrp.Velocity = hrp.Velocity:Lerp(Vector3.new(md.X * spd, vY, md.Z * spd), 0.18)
+            else
+                frenaEscala()
+            end
+        end
+    end)
+    table.insert(escalaConnections, cStep)
+end
+
+-- PLAYER CHAMS
+local MM2_PLACE_ID = 142823291
+local MMV_PLACE_ID = 384594589
+
+local function updatePlayerAura(p, c)
+    if not c then return end
+    local h = c:FindFirstChild("YellowAura")
+    if not h then
+        h = Instance.new("Highlight")
+        h.Name = "YellowAura"
+        h.Adornee = c
+        h.Parent = c
+    end
+
+    local placeId = game.PlaceId
+    local isMM = (placeId == MM2_PLACE_ID or placeId == MMV_PLACE_ID)
+
+    if isMM then
+        local backpack = p:FindFirstChild("Backpack")
+        local character = p.Character
+        
+        local hasKnife = (character and (character:FindFirstChild("Knife") or character:FindFirstChild("Asesino") or character:FindFirstChild("Murderer"))) or 
+                         (backpack and (backpack:FindFirstChild("Knife") or backpack:FindFirstChild("Asesino") or backpack:FindFirstChild("Murderer")))
+                         
+        local hasGun = (character and (character:FindFirstChild("Gun") or character:FindFirstChild("Sheriff") or character:FindFirstChild("Pistola"))) or 
+                       (backpack and (backpack:FindFirstChild("Gun") or backpack:FindFirstChild("Sheriff") or backpack:FindFirstChild("Pistola")))
+
+        for _, obj in ipairs(p:GetChildren()) do
+            if obj:IsA("BoolValue") or obj:IsA("StringValue") then
+                local valLower = string.lower(obj.Name .. " " .. tostring(obj.Value))
+                if valLower:find("knife") or valLower:find("murder") or valLower:find("asesino") then
+                    hasKnife = true
+                elseif valLower:find("gun") or valLower:find("sheriff") or valLower:find("pistola") then
+                    hasGun = true
+                end
+            end
+        end
+
+        if hasKnife then
+            h.FillColor = Color3.fromRGB(255, 0, 0)
+            h.OutlineColor = Color3.fromRGB(255, 255, 255)
+        elseif hasGun then
+            h.FillColor = Color3.fromRGB(0, 0, 255)
+            h.OutlineColor = Color3.fromRGB(255, 255, 255)
+        else
+            h.FillColor = Color3.fromRGB(255, 255, 255)
+            h.OutlineColor = Color3.fromRGB(200, 200, 200)
+        end
+    else
+        h.FillColor = Color3.fromRGB(255, 255, 255)
+        h.OutlineColor = Color3.fromRGB(200, 200, 200)
+    end
+    h.FillTransparency = 0.5
+end
+
+local function applyAura(p)
+    if p.Character then
+        updatePlayerAura(p, p.Character)
+    end
+end
+
+local function removeAura(c)
+    if c and c:FindFirstChild("YellowAura") then c.YellowAura:Destroy() end
+end
+
+local function enableChams()
+    for _, p in ipairs(P:GetPlayers()) do
+        if p ~= L then
+            applyAura(p)
+            local conn1 = p.CharacterAdded:Connect(function(c)
+                c:WaitForChild("HumanoidRootPart", 5)
+                if chamsActive then applyAura(p) end
+            end)
+            table.insert(chamsConnections, conn1)
+            
+            local conn2 = R.Heartbeat:Connect(function()
+                if chamsActive and p.Character then
+                    updatePlayerAura(p, p.Character)
+                end
+            end)
+            table.insert(chamsConnections, conn2)
+        end
+    end
+end
+
+local function disableChams()
+    for _, conn in ipairs(chamsConnections) do conn:Disconnect() end
+    chamsConnections = {}
+    for _, p in ipairs(P:GetPlayers()) do if p.Character then removeAura(p.Character) end end
+end
+
+local function onCharacterAdded(c)
+    humanoid = c:WaitForChild("Humanoid")
+    root = c:WaitForChild("HumanoidRootPart")
+    if humanoid then humanoid.CameraOffset = normalOffset end
+    if speedEscalaActive then startSpeedEscala() end
+    if antiFlingActive then applyAntiFling(true) end
+    if anticoinsActive then applyAntiCoins(true) end
+end
+
+if L.Character then onCharacterAdded(L.Character) end
+L.CharacterAdded:Connect(onCharacterAdded)
+
+R.RenderStepped:Connect(function()
+    if SPEED_ENABLED and humanoid and root then
+        local s = humanoid:GetState()
+        if s == Enum.HumanoidStateType.Jumping or s == Enum.HumanoidStateType.Freefall then
+            local d, v = humanoid.MoveDirection, root.AssemblyLinearVelocity
+            root.AssemblyLinearVelocity = v:Lerp(Vector3.new(d.X * speedValue, v.Y, d.Z * speedValue), 0.25)
+        end
+    end
+end)
+
+-- GUI PRINCIPAL
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "ControlPanelGui"
+ScreenGui.ResetOnSpawn = false
+
+pcall(function()
+    if gethui then ScreenGui.Parent = gethui()
+    elseif syn and syn.protect_gui then syn.protect_gui(ScreenGui); ScreenGui.Parent = C
+    else ScreenGui.Parent = L:WaitForChild("PlayerGui") end
+end)
+
+local MainFrame = Instance.new("Frame", ScreenGui)
+MainFrame.Size = UDim2.new(0, 310, 0, 420)
+MainFrame.Position = UDim2.new(0.5, -155, 0.1, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.ClipsDescendants = true
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
+
+local FrameStroke = Instance.new("UIStroke", MainFrame)
+FrameStroke.Thickness = 3
+
+task.spawn(function()
+    local hue = 0
+    while task.wait() do
+        hue = (hue + 0.005) % 1
+        FrameStroke.Color = Color3.fromHSV(hue, 1, 1)
+    end
+end)
+
+local Title = Instance.new("TextLabel", MainFrame)
+Title.Size = UDim2.new(1, -80, 0, 40)
+Title.Position = UDim2.new(0, 10, 0, 0)
+Title.BackgroundTransparency = 1
+Title.RichText = true
+Title.Text = 'X xixtrox (kywvoid)'
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextSize = 18
+Title.Font = Enum.Font.SourceSansBold
+Title.TextXAlignment = Enum.TextXAlignment.Left
+
+local MinimizeButton = Instance.new("TextButton", MainFrame)
+MinimizeButton.Size = UDim2.new(0, 30, 0, 30)
+MinimizeButton.Position = UDim2.new(1, -68, 0, 5)
+MinimizeButton.BackgroundColor3 = Color3.fromRGB(138, 43, 226)
+MinimizeButton.Text = "--"
+MinimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+MinimizeButton.Font = Enum.Font.GothamBlack
+MinimizeButton.TextSize = 16
+Instance.new("UICorner", MinimizeButton).CornerRadius = UDim.new(1, 0)
+
+local CloseButton = Instance.new("TextButton", MainFrame)
+CloseButton.Size = UDim2.new(0, 30, 0, 30)
+CloseButton.Position = UDim2.new(1, -34, 0, 5)
+CloseButton.BackgroundColor3 = Color3.fromRGB(138, 43, 226)
+CloseButton.Text = "X"
+CloseButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseButton.Font = Enum.Font.GothamBlack
+CloseButton.TextSize = 16
+Instance.new("UICorner", CloseButton).CornerRadius = UDim.new(1, 0)
+
+local isMinimized = false
+MinimizeButton.MouseButton1Click:Connect(function()
+    isMinimized = not isMinimized
+    MainFrame.Size = isMinimized and UDim2.new(0, 310, 0, 40) or UDim2.new(0, 310, 0, 420)
+end)
+
+CloseButton.MouseButton1Click:Connect(function()
+    disableChams()
+    stopSpeedEscala()
+    if worldPinkActive then applyWorldPink(false) end
+    if antiFlingActive then applyAntiFling(false) end
+    if anticoinsActive then applyAntiCoins(false) end
+    pcall(function() game.Workspace.Retargeting = Enum.AnimatorRetargetingMode.Auto end)
+    if humanoid then humanoid.CameraOffset = normalOffset end
+    ScreenGui:Destroy()
+end)
+
+local ContentScroll = Instance.new("ScrollingFrame", MainFrame)
+ContentScroll.Size = UDim2.new(1, -10, 1, -50)
+ContentScroll.Position = UDim2.new(0, 5, 0, 45)
+ContentScroll.BackgroundTransparency = 1
+ContentScroll.ScrollBarThickness = 6
+ContentScroll.ScrollBarImageColor3 = Color3.fromRGB(138, 43, 226)
+
+local mainLayout = Instance.new("UIListLayout", ContentScroll)
+mainLayout.SortOrder = Enum.SortOrder.LayoutOrder
+mainLayout.Padding = UDim.new(0, 8)
+mainLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+
+mainLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    ContentScroll.CanvasSize = UDim2.new(0, 0, 0, mainLayout.AbsoluteContentSize.Y + 20)
+end)
+
+local function createToggleButton(txt, order, colorOff)
+    local btn = Instance.new("TextButton", ContentScroll)
+    btn.Size = UDim2.new(0.95, 0, 0, 38)
+    btn.LayoutOrder = order
+    btn.BackgroundColor3 = colorOff or Color3.fromRGB(200, 35, 35)
+    btn.Text = txt .. " (OFF)"
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.SourceSansBold
+    btn.TextSize = 17
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    return btn
+end
+
+local function createActionScriptButton(txt, scriptUrl, order, customColor)
+    local btn = Instance.new("TextButton", ContentScroll)
+    btn.Size = UDim2.new(0.95, 0, 0, 38)
+    btn.LayoutOrder = order
+    btn.BackgroundColor3 = customColor or Color3.fromRGB(138, 43, 226)
+    btn.Text = txt
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.SourceSansBold
+    btn.TextSize = 17
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    
+    btn.MouseButton1Click:Connect(function()
+        pcall(function()
+            loadstring(game:HttpGet(scriptUrl))()
+        end)
+    end)
+    return btn
+end
+
+-- BOTONES DE ACCIÓN DE SCRIPTS
+createActionScriptButton("⚡ Old Speed", "https://pastefy.app/FfCWbzhp/raw", 0, Color3.fromRGB(218, 145, 35))
+createActionScriptButton("🎨 Pshade Ultimate", "https://rawscripts.net/raw/Universal-Script-Pshade-ultimate-38276", 1, Color3.fromRGB(53, 152, 219))
+createActionScriptButton("💃 Free Emote GUI", "https://rawscripts.net/raw/Universal-Script-Emote-Gui-75782", 2, Color3.fromRGB(176, 58, 153))
+createActionScriptButton("⚡ Vertex Script", "https://raw.smokingscripts.org/vertex.lua", 3, Color3.fromRGB(218, 128, 20))
+createActionScriptButton("🎛️ Panel Cnp", "https://raw.githubusercontent.com/ZoeWarOnTop/Painel-Cnp/refs/heads/main/Painel-Cnp", 4, Color3.fromRGB(46, 204, 113))
+
+-- SELECTOR DE SKYBOX
+local skyBoxContainer = Instance.new("Frame", ContentScroll)
+skyBoxContainer.Size = UDim2.new(0.95, 0, 0, 38)
+skyBoxContainer.LayoutOrder = 5
+skyBoxContainer.BackgroundTransparency = 1
+skyBoxContainer.ClipsDescendants = true
+
+local skyMainBtn = Instance.new("TextButton", skyBoxContainer)
+skyMainBtn.Size = UDim2.new(1, 0, 0, 38)
+skyMainBtn.BackgroundColor3 = Color3.fromRGB(50, 45, 65)
+skyMainBtn.Text = "🌌 Selector de Skybox"
+skyMainBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+skyMainBtn.Font = Enum.Font.SourceSansBold
+skyMainBtn.TextSize = 17
+Instance.new("UICorner", skyMainBtn).CornerRadius = UDim.new(0, 6)
+
+local skyScroll = Instance.new("ScrollingFrame", skyBoxContainer)
+skyScroll.Size = UDim2.new(1, 0, 0, 150)
+skyScroll.Position = UDim2.new(0, 0, 0, 42)
+skyScroll.BackgroundTransparency = 1
+skyScroll.Visible = false
+skyScroll.ScrollBarThickness = 4
+skyScroll.CanvasSize = UDim2.new(0, 0, 0, #skyList * 32)
+
+local skyLayout = Instance.new("UIListLayout", skyScroll)
+skyLayout.SortOrder = Enum.SortOrder.LayoutOrder
+skyLayout.Padding = UDim.new(0, 4)
+
+for i, sky in ipairs(skyList) do
+    local skyBtn = Instance.new("TextButton", skyScroll)
+    skyBtn.Size = UDim2.new(1, -4, 0, 28)
+    skyBtn.LayoutOrder = i
+    skyBtn.BackgroundColor3 = Color3.fromRGB(70, 60, 90)
+    skyBtn.Text = sky.Name
+    skyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    skyBtn.Font = Enum.Font.SourceSans
+    skyBtn.TextSize = 14
+    Instance.new("UICorner", skyBtn).CornerRadius = UDim.new(0, 4)
+
+    skyBtn.MouseButton1Click:Connect(function()
+        SetSky(sky.Id)
+    end)
+end
+
+local skyOpen = false
+skyMainBtn.MouseButton1Click:Connect(function()
+    skyOpen = not skyOpen
+    skyScroll.Visible = skyOpen
+    skyBoxContainer.Size = skyOpen and UDim2.new(0.95, 0, 0, 195) or UDim2.new(0.95, 0, 0, 38)
+end)
+
+-- CREACIÓN DE BOTONES TOGGLE
+local btnSpeedEscala = createToggleButton("⚡ Speed Escala", 6)
+btnSpeedEscala.MouseButton1Click:Connect(function()
+    speedEscalaActive = not speedEscalaActive
+    btnSpeedEscala.BackgroundColor3 = speedEscalaActive and Color3.fromRGB(40, 180, 80) or Color3.fromRGB(200, 35, 35)
+    btnSpeedEscala.Text = "⚡ Speed Escala " .. (speedEscalaActive and "(ON)" or "(OFF)")
+    if speedEscalaActive then
+        startSpeedEscala()
+    else
+        stopSpeedEscala()
+    end
+end)
+
+local btnGunAnim = createToggleButton("🔫 Gun Animation", 7)
+btnGunAnim.MouseButton1Click:Connect(function()
+    gunAnimActive = not gunAnimActive
+    btnGunAnim.BackgroundColor3 = gunAnimActive and Color3.fromRGB(40, 180, 80) or Color3.fromRGB(200, 35, 35)
+    btnGunAnim.Text = "🔫 Gun Animation " .. (gunAnimActive and "(ON)" or "(OFF)")
+    applyGunAnim(gunAnimActive)
+end)
+
+local btnGunSound = createToggleButton("🔊 Gun Sound", 8)
+btnGunSound.MouseButton1Click:Connect(function()
+    gunSoundActive = not gunSoundActive
+    btnGunSound.BackgroundColor3 = gunSoundActive and Color3.fromRGB(40, 180, 80) or Color3.fromRGB(200, 35, 35)
+    btnGunSound.Text = "🔊 Gun Sound " .. (gunSoundActive and "(ON)" or "(OFF)")
+end)
+
+local btnChams = createToggleButton("👁️ Player Chams", 9)
+btnChams.MouseButton1Click:Connect(function()
+    chamsActive = not chamsActive
+    btnChams.BackgroundColor3 = chamsActive and Color3.fromRGB(40, 180, 80) or Color3.fromRGB(200, 35, 35)
+    btnChams.Text = "👁️ Player Chams " .. (chamsActive and "(ON)" or "(OFF)")
+    if chamsActive then enableChams() else disableChams() end
+end)
+
+local btnOldShift = createToggleButton("📷 Old Shift Lock", 10)
+btnOldShift.MouseButton1Click:Connect(function()
+    oldShiftActive = not oldShiftActive
+    btnOldShift.BackgroundColor3 = oldShiftActive and Color3.fromRGB(40, 180, 80) or Color3.fromRGB(200, 35, 35)
+    btnOldShift.Text = "📷 Old Shift Lock " .. (oldShiftActive and "(ON)" or "(OFF)")
+end)
+
+local btnWorldPink = createToggleButton("🌸 World Pink", 11)
+btnWorldPink.MouseButton1Click:Connect(function()
+    worldPinkActive = not worldPinkActive
+    btnWorldPink.BackgroundColor3 = worldPinkActive and Color3.fromRGB(40, 180, 80) or Color3.fromRGB(200, 35, 35)
+    btnWorldPink.Text = "🌸 World Pink " .. (worldPinkActive and "(ON)" or "(OFF)")
+    applyWorldPink(worldPinkActive)
+end)
+
+local btnOldQuality = createToggleButton("⚙️ Old Quality", 12)
+btnOldQuality.MouseButton1Click:Connect(function()
+    oldQualityActive = not oldQualityActive
+    btnOldQuality.BackgroundColor3 = oldQualityActive and Color3.fromRGB(40, 180, 80) or Color3.fromRGB(200, 35, 35)
+    btnOldQuality.Text = "⚙️ Old Quality " .. (oldQualityActive and "(ON)" or "(OFF)")
+    applyOldQuality(oldQualityActive)
+end)
+
+local btnAntiFling = createToggleButton("🛡️ Anti Fling", 13)
+btnAntiFling.MouseButton1Click:Connect(function()
+    antiFlingActive = not antiFlingActive
+    btnAntiFling.BackgroundColor3 = antiFlingActive and Color3.fromRGB(40, 180, 80) or Color3.fromRGB(200, 35, 35)
+    btnAntiFling.Text = "🛡️ Anti Fling " .. (antiFlingActive and "(ON)" or "(OFF)")
+    applyAntiFling(antiFlingActive)
+end)
+
+local btnAntiCoins = createToggleButton("🪙 Anti Coins (MM2)", 14)
+btnAntiCoins.MouseButton1Click:Connect(function()
+    anticoinsActive = not anticoinsActive
+    btnAntiCoins.BackgroundColor3 = anticoinsActive and Color3.fromRGB(40, 180, 80) or Color3.fromRGB(200, 35, 35)
+    btnAntiCoins.Text = "🪙 Anti Coins (MM2) " .. (anticoinsActive and "(ON)" or "(OFF)")
+    applyAntiCoins(anticoinsActive)
+end)
+
+local btnNoclip = createToggleButton("👻 Noclip", 15)
+btnNoclip.MouseButton1Click:Connect(function()
+    noclipActive = not noclipActive
+    btnNoclip.BackgroundColor3 = noclipActive and Color3.fromRGB(40, 180, 80) or Color3.fromRGB(200, 35, 35)
+    btnNoclip.Text = "👻 Noclip " .. (noclipActive and "(ON)" or "(OFF)")
+end)
+
+local btnInfJump = createToggleButton("🦘 Infinite Jump", 16)
+btnInfJump.MouseButton1Click:Connect(function()
+    infJumpActive = not infJumpActive
+    btnInfJump.BackgroundColor3 = infJumpActive and Color3.fromRGB(40, 180, 80) or Color3.fromRGB(200, 35, 35)
+    btnInfJump.Text = "🦘 Infinite Jump " .. (infJumpActive and "(ON)" or "(OFF)")
+end)
+
+-- OLD ANIMATION ARREGLADO PARA RESTABLECERSE AL APAGAR
+local btnOldAnim = createToggleButton("🦴 Old Animation", 17)
+btnOldAnim.MouseButton1Click:Connect(function()
+    oldAnimActive = not oldAnimActive
+    btnOldAnim.BackgroundColor3 = oldAnimActive and Color3.fromRGB(40, 180, 80) or Color3.fromRGB(200, 35, 35)
+    btnOldAnim.Text = "🦴 Old Animation " .. (oldAnimActive and "(ON)" or "(OFF)")
+    
+    pcall(function()
+        if oldAnimActive then
+            game.Workspace.Retargeting = Enum.AnimatorRetargetingMode.Disabled
+        else
+            game.Workspace.Retargeting = Enum.AnimatorRetargetingMode.Auto
+            local char = L.Character
+            if char and char:FindFirstChildOfClass("Humanoid") then
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+            end
+        end
+    end)
+end)
+
+-- FUNCIÓN DE LIMPIEZA GLOBAL AL REINICIAR EL SCRIPT
+shared[ID] = function()
+    disableChams()
+    stopSpeedEscala()
+    if worldPinkActive then applyWorldPink(false) end
+    if antiFlingActive then applyAntiFling(false) end
+    if anticoinsActive then applyAntiCoins(false) end
+    pcall(function() game.Workspace.Retargeting = Enum.AnimatorRetargetingMode.Auto end)
+    if humanoid then humanoid.CameraOffset = normalOffset end
+    pcall(function() ScreenGui:Destroy() end)
+    shared[ID] = nil
+end
